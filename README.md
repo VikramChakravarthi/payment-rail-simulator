@@ -105,6 +105,4 @@ curl -i -X POST http://localhost:8080/payments \
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:devpass@localhost:5432/fednow` |
 
-## License
 
-MIT
