@@ -46,6 +46,7 @@ func main() {
 	defer db.Close()
 
 	http.HandleFunc("/payments", handlePayment)
+	http.HandleFunc("/uetr/", handleGetPaymentByUETR) // API endpoint: GET http://localhost:8080/uetr/{uetr}
 
 	log.Println("server starting on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil)) // API endpoint: POST http://localhost:8080/payments
@@ -110,7 +111,7 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 	).Scan(&id, &createdAt)
 
 	if err != nil {
-		http.Error(w, "database error: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "database error: "+err.Error(), http.StatusConflict) // 409 Conflict
 		return
 	}
 
@@ -130,4 +131,55 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated) // 201 Created
 	}
 	json.NewEncoder(w).Encode(resp)
+}
+
+func handleGetPaymentByUETR(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// extract UETR from the URL path
+	uetr := r.URL.Path[len("/uetr/"):]
+
+	if uetr == "" {
+		http.Error(w, "uetr is required", http.StatusBadRequest)
+		return
+	}
+
+	var id, EndToEndId, status, rejectReason, currency string
+	var createdAt time.Time
+	var amount float64
+
+	query := `
+		SELECT id, uetr, end_to_end_id, status, reject_reason, created_at,
+		amount, currency
+		FROM payments
+		WHERE uetr = $1`
+
+	err := db.QueryRow(context.Background(), query, uetr).Scan(
+		&id, &uetr, &EndToEndId, &status, &rejectReason, &createdAt, &amount, &currency,
+	)
+
+	if err != nil {
+		http.Error(w, "payment not found", http.StatusNotFound)
+		return
+	}
+
+	resp := map[string]interface{}{
+		"id":            id,
+		"uetr":          uetr,
+		"end_to_end_id": EndToEndId,
+		"status":        status,
+		"reject_reason": rejectReason,
+		"created_at":    createdAt.Format(time.RFC3339),
+		"amount":        amount,
+		"currency":      currency,
+	
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+
 }

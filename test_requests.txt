@@ -1,0 +1,74 @@
+COMMAND: 
+curl -i -X POST http://localhost:8080/payments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "FIToFICstmrCdtTrf": {
+      "GrpHdr": {
+        "MsgId": "MSG-20260701-0001",
+        "CreDtTm": "2026-07-01T13:00:00Z",
+        "NbOfTxs": "1",
+        "SttlmInf": {
+          "SttlmMtd": "CLRG"
+        }
+      },
+      "CdtTrfTxInf": {
+        "PmtId": {
+          "InstrId": "INSTR-20260701-0001",
+          "EndToEndId": "E2E-20260701-0001",
+          "TxId": "TX-20260701-0001",
+          "UETR": "550e8400-e29b-41d4-a716-446655440001"
+        },
+        "IntrBkSttlmAmt": {
+          "Ccy": "USD",
+          "value": 125.50
+        },
+        "ChrgBr": "SLEV",
+        "Dbtr": {
+          "Nm": "Alice Corp"
+        },
+        "DbtrAcct": {
+          "Id": {
+            "Othr": {
+              "Id": "ALICE-ACCOUNT-001"
+            }
+          }
+        },
+        "DbtrAgt": {
+          "FinInstnId": {
+            "ClrSysMmbId": {
+              "MmbId": "021000021"
+            }
+          }
+        },
+        "CdtrAgt": {
+          "FinInstnId": {
+            "ClrSysMmbId": {
+              "MmbId": "011000015"
+            }
+          }
+        },
+        "Cdtr": {
+          "Nm": "Bob LLC"
+        },
+        "CdtrAcct": {
+          "Id": {
+            "Othr": {
+              "Id": "BOB-ACCOUNT-001"
+            }
+          }
+        },
+        "RmtInf": {
+          "Ustrd": "Invoice 12345"
+        }
+      }
+    }
+  }'
+
+EXPECTED: 
+HTTP/1.1 201 Created
+Content-Type: application/json
+Date: Wed, 01 Jul 2026 15:29:30 GMT
+Content-Length: 209
+
+{"created_at":"2026-07-01T16:29:30+01:00","end_to_end_id":"E2E-20260701-0001","id":"2bbca3e0-93e0-4df9-a2d6-6810bc74648a","reject_reason":"","status":"validated","uetr":"550e8400-e29b-41d4-a716-446655440001"}
+
