@@ -12,12 +12,14 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"errors"
 	"net/http"
 	"time"
 	"os"
 
 	"github.com/joho/godotenv"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // global database connection pool (keeping reusable database connections instead of opening new 
@@ -45,8 +47,11 @@ func main() {
 	// close database pool when program shuts down
 	defer db.Close()
 
-	http.HandleFunc("/payments", handlePayment)
-	http.HandleFunc("/uetr/", handleGetPaymentByUETR) // API endpoint: GET http://localhost:8080/uetr/{uetr}
+	rateLimiter := NewRateLimiter(5, 10) // 5 requests per second, burst of 10
+
+	http.HandleFunc("/payments", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handlePayment))))
+
+	http.HandleFunc("/uetr/", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetPaymentByUETR)))) // API endpoint: GET http://localhost:8080/uetr/{uetr}
 
 	log.Println("server starting on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil)) // API endpoint: POST http://localhost:8080/payments
@@ -111,6 +116,16 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 	).Scan(&id, &createdAt)
 
 	if err != nil {
+		var pgErr *pgconn.PgError // error type assertion to check if error is a Postgres error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // 23505 is Postgres error code for unique violation
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict) // 409 Conflict
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "payment with the same UETR already exists",
+				"uetr": tx.PmtId.UETR,
+			})
+			return
+		}
 		http.Error(w, "database error: "+err.Error(), http.StatusConflict) // 409 Conflict
 		return
 	}

@@ -2,6 +2,17 @@
 
 A Go-based payment processing simulator for FI-to-FI (Financial Institution to Financial Institution) customer credit transfers. Implements ISO 20022 XML message format validation and processing.
 
+# Architectural Decisions
+
+When money is being transferred from one account to another, the non-negotiable characteristics are: settlement finality, continuous availability, immutable audit trail, and atomic settlement. Settlement finality meaning that transactions cannot be reversed once made. Immutable audit trail meaning that all transactions are tracable. Continuous availability uptime meaning that transactions cannot be stopped because of maintainance. Atomic settlement meaning that both legs of the transaction finalize or both fail.
+
+To achieve these constraints, the best design approach for payments is a finite state machine. 
+The states being used are:
+RECEIVED -> VALIDATED -> PROCESSING -> SETTLED
+            |-> REJECTED  |-> FAILED
+
+Postgress is being used as the databse storage. Concurrency of payments is resolved by using the UNIQUE constraint. 
+
 ## Prerequisites
 
 - Go 1.26 or higher
