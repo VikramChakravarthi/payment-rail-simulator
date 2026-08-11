@@ -24,3 +24,17 @@ CREATE TABLE payments (
     reject_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE payment_transition_log (
+    id BIGSERIAL PRIMARY KEY, -- for numbering the transitions
+    payment_id UUID REFERENCES payments(id), -- unique internal database ID for each payment
+    sequence_number BIGINT NOT NULL, -- sequence number of the transition for a given payment
+    from_state VARCHAR(20) NOT NULL, -- the state from which the payment is transitioning
+    to_state VARCHAR(20) NOT NULL, -- the state to which the payment is transitioning
+    event_type VARCHAR(20) NOT NULL, -- the event that triggered the transition
+    reason TEXT, -- optional reason for the transition 
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- timestamp of when the transition occurred
+
+    UNIQUE (payment_id, sequence_number) -- ensure that for a given payment, the sequence number is unique
+);
+

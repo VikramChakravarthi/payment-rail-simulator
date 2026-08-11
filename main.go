@@ -11,18 +11,18 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"errors"
+	"log"
 	"net/http"
-	"time"
 	"os"
+	"time"
 
-	"github.com/joho/godotenv"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
-// global database connection pool (keeping reusable database connections instead of opening new 
+// global database connection pool (keeping reusable database connections instead of opening new
 // database connection for every request)
 var db *pgxpool.Pool
 
@@ -65,19 +65,18 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var doc Document // creating empty Document struct
-	// reading JSON of request body and filling Document 
+	// reading JSON of request body and filling Document
 	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest) // 404 Bad Request (Client mistake)
 		return
 	}
 
 	tx := doc.FIToFICstmrCdtTrf.CdtTrfTxInf // tx is payment transaction object
-	// assume validated status as default
-	status := "validated"
+	event := EventValidationPassed
 	rejectReason := ""
 
 	if err := validatePayment(doc); err != nil {
-		status = "rejected"
+		event = EventValidationFailed
 		rejectReason = err.Error() // rejected payment recorded for future debugging
 	}
 
@@ -111,18 +110,18 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 		tx.CdtrAcct.Id.Othr.Id,
 		tx.CdtrAgt.FinInstnId.ClrSysMmbId.MmbId,
 		tx.RmtInf.Ustrd,
-		status,
-		rejectReason,
+		string(StateReceived),
+		"",
 	).Scan(&id, &createdAt)
 
 	if err != nil {
-		var pgErr *pgconn.PgError // error type assertion to check if error is a Postgres error
+		var pgErr *pgconn.PgError                            // error type assertion to check if error is a Postgres error
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // 23505 is Postgres error code for unique violation
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict) // 409 Conflict
 			json.NewEncoder(w).Encode(map[string]string{
 				"error": "payment with the same UETR already exists",
-				"uetr": tx.PmtId.UETR,
+				"uetr":  tx.PmtId.UETR,
 			})
 			return
 		}
@@ -130,17 +129,23 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	finalState, err := applyPaymentEvent(r.Context(), id, event, rejectReason)
+	if err != nil {
+		http.Error(w, "state transition error: "+err.Error(), http.StatusInternalServerError) // 500 Internal Server Error
+		return
+	}
+
 	resp := map[string]string{
 		"id":            id,
 		"uetr":          tx.PmtId.UETR,
 		"end_to_end_id": tx.PmtId.EndToEndId,
-		"status":        status,
+		"status":        string(finalState),
 		"reject_reason": rejectReason,
 		"created_at":    createdAt.Format(time.RFC3339),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if status == "rejected" {
+	if finalState == "rejected" {
 		w.WriteHeader(http.StatusUnprocessableEntity) // 422 Unprocessable Entity
 	} else {
 		w.WriteHeader(http.StatusCreated) // 201 Created
@@ -191,7 +196,6 @@ func handleGetPaymentByUETR(w http.ResponseWriter, r *http.Request) {
 		"created_at":    createdAt.Format(time.RFC3339),
 		"amount":        amount,
 		"currency":      currency,
-	
 	}
 
 	w.Header().Set("Content-Type", "application/json")
