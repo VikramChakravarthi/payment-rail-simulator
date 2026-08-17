@@ -64,6 +64,8 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context() // context of the request, used for database operations and cancellation
+
 	var doc Document // creating empty Document struct
 	// reading JSON of request body and filling Document
 	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
@@ -80,6 +82,14 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 		rejectReason = err.Error() // rejected payment recorded for future debugging
 	}
 
+	dbTx, err := db.Begin(ctx) // start database transaction
+	if err != nil {
+		http.Error(w, "falied to start database transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	defer dbTx.Rollback(ctx) // rollback transaction if function exits before commit
+
 	var id string
 	var createdAt time.Time
 
@@ -95,7 +105,7 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 
 	// Go sends payments values, Postgress inserts row, Postgress generates id and created_at,
 	// postgress returns them, Go stores them in id and createdAt, Go includes them in JSON response
-	err := db.QueryRow(context.Background(), query,
+	err = dbTx.QueryRow(ctx, query,
 		tx.PmtId.UETR,
 		tx.PmtId.EndToEndId,
 		tx.PmtId.InstrId,
@@ -129,9 +139,14 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	finalState, err := applyPaymentEvent(r.Context(), id, event, rejectReason)
+	finalState, err := applyPaymentEventTx(ctx, dbTx, id, event, rejectReason)
 	if err != nil {
 		http.Error(w, "state transition error: "+err.Error(), http.StatusInternalServerError) // 500 Internal Server Error
+		return
+	}
+
+	if err := dbTx.Commit(ctx); err != nil {
+		http.Error(w, "failed to commit transaction: "+err.Error(), http.StatusInternalServerError) // 500 Internal Server Error
 		return
 	}
 
@@ -145,7 +160,7 @@ func handlePayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if finalState == "rejected" {
+	if finalState == StateRejected {
 		w.WriteHeader(http.StatusUnprocessableEntity) // 422 Unprocessable Entity
 	} else {
 		w.WriteHeader(http.StatusCreated) // 201 Created
