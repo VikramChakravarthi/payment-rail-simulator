@@ -26,6 +26,15 @@ import (
 // database connection for every request)
 var db *pgxpool.Pool
 
+type TransitionLogEntry struct {
+	SequenceNumber   int64	   `json:"sequence_number"`
+	FromState        string    `json:"from_state"`
+	ToState          string    `json:"to_state"`
+	EventType        string    `json:"event_type"`
+	Reason           string    `json:"reason"`
+	CreatedAt        string `json:"created_at"`
+}
+
 func main() {
 	var err error
 	// Load .env file first
@@ -50,6 +59,8 @@ func main() {
 	rateLimiter := NewRateLimiter(5, 10) // 5 requests per second, burst of 10
 
 	http.HandleFunc("/payments", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handlePayment))))
+
+	http.HandleFunc("/transition-log", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetTransitionLog)))) // API endpoint: GET http://localhost:8080/transition-log?payment_id={payment_id}
 
 	http.HandleFunc("/uetr/", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetPaymentByUETR)))) // API endpoint: GET http://localhost:8080/uetr/{uetr}
 
@@ -216,4 +227,69 @@ func handleGetPaymentByUETR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 
+}
+
+func handleGetTransitionLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	paymentID := r.URL.Query().Get("payment_id")
+	if paymentID == "" {
+		http.Error(w, "payment_id is required", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+		SELECT sequence_number, from_state, to_state, event_type, reason, created_at
+		FROM payment_transition_log
+		WHERE payment_id = $1
+		ORDER BY sequence_number ASC`
+	
+	rows, err := db.Query(ctx, query, paymentID)
+	if err != nil {
+		http.Error(w, "failed to query transition log: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close() // close rows when function exits
+
+	var transitionLogs []TransitionLogEntry
+
+	for rows.Next() {
+		var entry TransitionLogEntry
+		var createdAt time.Time
+
+		err := rows.Scan(
+			&entry.SequenceNumber,
+			&entry.FromState,
+			&entry.ToState,
+			&entry.EventType,
+			&entry.Reason,
+			&createdAt,	
+		)
+
+		if err != nil {
+			http.Error(w, "failed to scan transition log: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		entry.CreatedAt = createdAt.Format(time.RFC3339)
+		transitionLogs = append(transitionLogs, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, "error iterating over transition log rows: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(transitionLogs) == 0 {
+		http.Error(w, "transition log not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(transitionLogs)
 }
