@@ -27,12 +27,24 @@ import (
 var db *pgxpool.Pool
 
 type TransitionLogEntry struct {
-	SequenceNumber   int64	   `json:"sequence_number"`
-	FromState        string    `json:"from_state"`
-	ToState          string    `json:"to_state"`
-	EventType        string    `json:"event_type"`
-	Reason           string    `json:"reason"`
-	CreatedAt        string `json:"created_at"`
+	SequenceNumber int64  `json:"sequence_number"`
+	FromState      string `json:"from_state"`
+	ToState        string `json:"to_state"`
+	EventType      string `json:"event_type"`
+	Reason         string `json:"reason"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type ClearPaymentResponse struct {
+	ID              string `json:"id"`
+	Status          string `json:"status"`
+	DebtorAccount   string `json:"debtor_account"`
+	CreditorAccount string `json:"creditor_account"`
+	DebtorAgent     string `json:"debtor_agent"`
+	CreditorAgent   string `json:"creditor_agent"`
+	Amount          string `json:"amount"`
+	Currency        string `json:"currency"`
+	Message         string `json:"message"`
 }
 
 func main() {
@@ -59,6 +71,8 @@ func main() {
 	rateLimiter := NewRateLimiter(5, 10) // 5 requests per second, burst of 10
 
 	http.HandleFunc("/payments", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handlePayment))))
+
+	http.HandleFunc("/payments/clear", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleClearPayment))))
 
 	http.HandleFunc("/transition-log", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetTransitionLog)))) // API endpoint: GET http://localhost:8080/transition-log?payment_id={payment_id}
 
@@ -248,7 +262,7 @@ func handleGetTransitionLog(w http.ResponseWriter, r *http.Request) {
 		FROM payment_transition_log
 		WHERE payment_id = $1
 		ORDER BY sequence_number ASC`
-	
+
 	rows, err := db.Query(ctx, query, paymentID)
 	if err != nil {
 		http.Error(w, "failed to query transition log: "+err.Error(), http.StatusInternalServerError)
@@ -268,7 +282,7 @@ func handleGetTransitionLog(w http.ResponseWriter, r *http.Request) {
 			&entry.ToState,
 			&entry.EventType,
 			&entry.Reason,
-			&createdAt,	
+			&createdAt,
 		)
 
 		if err != nil {
@@ -292,4 +306,174 @@ func handleGetTransitionLog(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(transitionLogs)
+}
+
+func handleClearPayment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	paymentID := r.URL.Query().Get("payment_id")
+	if paymentID == "" {
+		http.Error(w, "payment_id is required", http.StatusBadRequest)
+		return
+	}
+
+	dbTx, err := db.Begin(ctx)
+	if err != nil {
+		http.Error(w, "failed to start database transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer dbTx.Rollback(ctx)
+
+	var currentState PaymentState
+	var debtorAccount string
+	var creditorAccount string
+	var debtorAgent string
+	var creditorAgent string
+	var amount string
+	var currency string
+
+	err = dbTx.QueryRow(ctx, `
+		SELECT status, debtor_account, creditor_account, debtor_agent, creditor_agent, amount::text, currency
+		FROM payments
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`, paymentID).Scan(
+		&currentState,
+		&debtorAccount,
+		&creditorAccount,
+		&debtorAgent,
+		&creditorAgent,
+		&amount,
+		&currency,
+	)
+	if err != nil {
+		http.Error(w, "payment not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if currentState != StateValidated {
+		http.Error(w, "payment must be validated before clearing", http.StatusConflict)
+		return
+	}
+
+	_, err = applyPaymentEventTx(ctx, dbTx, paymentID, EventClearingStarted, "")
+	if err != nil {
+		http.Error(w, "state transition error: failed to start clearing: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var creditorExists bool
+	err = dbTx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM accounts
+			WHERE account_id = $1
+			  AND routing_number = $2
+			  AND status = 'active'
+			  AND currency = $3
+		)
+	`, creditorAccount, creditorAgent, currency).Scan(&creditorExists)
+	if err != nil {
+		http.Error(w, "failed to check creditor account: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if !creditorExists {
+		finalState, transitionErr := applyPaymentEventTx(ctx, dbTx, paymentID, EventClearingFailed, "creditor account does not exist or is inactive")
+		if transitionErr != nil {
+			http.Error(w, "failed to record clearing failure: "+transitionErr.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := dbTx.Commit(ctx); err != nil {
+			http.Error(w, "failed to commit clearing failure: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(ClearPaymentResponse{
+			ID:              paymentID,
+			Status:          string(finalState),
+			DebtorAccount:   debtorAccount,
+			CreditorAccount: creditorAccount,
+			DebtorAgent:     debtorAgent,
+			CreditorAgent:   creditorAgent,
+			Amount:          amount,
+			Currency:        currency,
+			Message:         "creditor account does not exist or is inactive",
+		})
+		return
+	}
+
+	var reservedAccountID string
+
+	err = dbTx.QueryRow(ctx, `
+		UPDATE accounts
+		SET reserved_balance = reserved_balance + $1::numeric
+		WHERE account_id = $2
+		  AND routing_number = $3
+		  AND status = 'active'
+		  AND currency = $4
+		  AND balance - reserved_balance >= $1::numeric
+		RETURNING account_id
+	`, amount, debtorAccount, debtorAgent, currency).Scan(&reservedAccountID)
+
+	if err != nil {
+		finalState, transitionErr := applyPaymentEventTx(ctx, dbTx, paymentID, EventClearingFailed, "debtor account has insufficient available funds or is inactive")
+		if transitionErr != nil {
+			http.Error(w, "failed to record clearing failure: "+transitionErr.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := dbTx.Commit(ctx); err != nil {
+			http.Error(w, "failed to commit clearing failure: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(ClearPaymentResponse{
+			ID:              paymentID,
+			Status:          string(finalState),
+			DebtorAccount:   debtorAccount,
+			CreditorAccount: creditorAccount,
+			DebtorAgent:     debtorAgent,
+			CreditorAgent:   creditorAgent,
+			Amount:          amount,
+			Currency:        currency,
+			Message:         "debtor account has insufficient available funds or is inactive",
+		})
+		return
+	}
+
+	finalState, err := applyPaymentEventTx(ctx, dbTx, paymentID, EventClearingPassed, "")
+	if err != nil {
+		http.Error(w, "failed to complete clearing: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := dbTx.Commit(ctx); err != nil {
+		http.Error(w, "failed to commit clearing: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(ClearPaymentResponse{
+		ID:              paymentID,
+		Status:          string(finalState),
+		DebtorAccount:   debtorAccount,
+		CreditorAccount: creditorAccount,
+		DebtorAgent:     debtorAgent,
+		CreditorAgent:   creditorAgent,
+		Amount:          amount,
+		Currency:        currency,
+		Message:         "payment cleared and forwarded to the receiver bank",
+	})
 }

@@ -38,3 +38,20 @@ CREATE TABLE payment_transition_log (
     UNIQUE (payment_id, sequence_number) -- ensure that for a given payment, the sequence number is unique
 );
 
+CREATE TABLE IF NOT EXISTS banks (
+    routing_number VARCHAR(35) PRIMARY_KEY, -- unique routing number for each bank
+    bank_name TEXT NOT NULL, -- name of the bank
+    status VARCHAR(20) NOT NULL DEFAULT 'active', -- status of the bank (active, inactive, etc.)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()  -- timestamp of when the bank was added
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    account_id VARCHAR(34) PRIMARY_KEY,
+    routing_numer VARCHAR(35) NOT NULL,
+    owner_name TEXT NOT NULL,
+    balance NUMERIC(18,2) NOT NULL DEFAULT 0.00,
+    reserved_balance NUMERIC(18,2) NOT NULL DEFAULT 0.00,
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
