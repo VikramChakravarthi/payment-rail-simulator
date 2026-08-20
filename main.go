@@ -693,6 +693,25 @@ func handleSettlePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err = recordLedgerTransactionTx(
+		ctx,
+		dbTx,
+		paymentID,
+		debtorAccount,
+		creditorAccount,
+		amount,
+		currency,
+	)
+
+	if err != nil {
+		http.Error(
+			w,
+			"failed to record ledger transaction: "+err.Error(),
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
 	var debitedAccountID string
 
 	err = dbTx.QueryRow(ctx, `
