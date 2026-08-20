@@ -11,6 +11,9 @@ const (
 	StateClearing         PaymentState = "clearing"
 	StateAwaitingResponse PaymentState = "awaiting_response"
 	StateFailed           PaymentState = "failed"
+	StateAccepted         PaymentState = "accepted"
+	StateSettling         PaymentState = "settling"
+	StateSettled          PaymentState = "settled"
 )
 
 type PaymentEvent string
@@ -22,6 +25,13 @@ const (
 	EventClearingStarted PaymentEvent = "clearing_started"
 	EventClearingPassed  PaymentEvent = "clearing_passed"
 	EventClearingFailed  PaymentEvent = "clearing_failed"
+
+	EventReceiverAccepted PaymentEvent = "receiver_accepted"
+	EventReceiverRejected PaymentEvent = "receiver_rejected"
+
+	EventSettlementStarted   PaymentEvent = "settlement_started"
+	EventSettlementCompleted PaymentEvent = "settlement_completed"
+	EventSettlementFailed    PaymentEvent = "settlement_failed"
 )
 
 func NextPaymentState(current PaymentState, event PaymentEvent) (PaymentState, error) {
@@ -48,6 +58,34 @@ func NextPaymentState(current PaymentState, event PaymentEvent) (PaymentState, e
 		case EventClearingPassed:
 			return StateAwaitingResponse, nil
 		case EventClearingFailed:
+			return StateFailed, nil
+		default:
+			return "", fmt.Errorf("invalid event %s for state %s", event, current)
+		}
+
+	case StateAwaitingResponse:
+		switch event {
+		case EventReceiverAccepted:
+			return StateAccepted, nil
+		case EventReceiverRejected:
+			return StateFailed, nil
+		default:
+			return "", fmt.Errorf("invalid event %s for state %s", event, current)
+		}
+
+	case StateAccepted:
+		switch event {
+		case EventSettlementStarted:
+			return StateSettling, nil
+		default:
+			return "", fmt.Errorf("invalid event %s for state %s", event, current)
+		}
+
+	case StateSettling:
+		switch event {
+		case EventSettlementCompleted:
+			return StateSettled, nil
+		case EventSettlementFailed:
 			return StateFailed, nil
 		default:
 			return "", fmt.Errorf("invalid event %s for state %s", event, current)

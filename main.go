@@ -47,6 +47,11 @@ type ClearPaymentResponse struct {
 	Message         string `json:"message"`
 }
 
+type ReceiverResponseRequest struct {
+	Accepted bool   `json:"accepted"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 func main() {
 	var err error
 	// Load .env file first
@@ -73,6 +78,10 @@ func main() {
 	http.HandleFunc("/payments", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handlePayment))))
 
 	http.HandleFunc("/payments/clear", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleClearPayment))))
+
+	http.HandleFunc("/payments/respond", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleReceiverResponse))))
+
+	http.HandleFunc("/payments/settle", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleSettlePayment))))
 
 	http.HandleFunc("/transition-log", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetTransitionLog)))) // API endpoint: GET http://localhost:8080/transition-log?payment_id={payment_id}
 
@@ -475,5 +484,289 @@ func handleClearPayment(w http.ResponseWriter, r *http.Request) {
 		Amount:          amount,
 		Currency:        currency,
 		Message:         "payment cleared and forwarded to the receiver bank",
+	})
+}
+
+func handleReceiverResponse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	paymentID := r.URL.Query().Get("payment_id")
+	if paymentID == "" {
+		http.Error(w, "payment_id is required", http.StatusBadRequest)
+		return
+	}
+
+	var req ReceiverResponseRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	dbTx, err := db.Begin(ctx) // starting database transaction
+
+	if err != nil {
+		http.Error(w, "failed to start database transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	defer dbTx.Rollback(ctx)
+
+	var currentState PaymentState
+	var debtorAccount string
+	var debtorAgent string
+	var amount string
+	var currency string
+
+	err = dbTx.QueryRow(ctx, `
+		SELECT status, debtor_account, debtor_agent, amount::text, currency
+		FROM payments
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`, paymentID).Scan(
+		&currentState,
+		&debtorAccount,
+		&debtorAgent,
+		&amount,
+		&currency,
+	)
+
+	if err != nil {
+		http.Error(w, "payment not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if currentState != StateAwaitingResponse {
+		http.Error(w, "payment must be awaiting receiver response", http.StatusConflict)
+		return
+	}
+
+	if req.Accepted {
+		finalState, err := applyPaymentEventTx(
+			ctx, dbTx, paymentID, EventReceiverAccepted, "",
+		)
+
+		if err != nil {
+			http.Error(w, "failed to accept payment"+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := dbTx.Commit(ctx); err != nil {
+			http.Error(w, "failed to commit receiver response: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		json.NewEncoder(w).Encode(map[string]string{
+			"id":      paymentID,
+			"status":  string(finalState),
+			"message": "receiver accepted payment",
+		})
+
+		return
+	}
+
+	reason := req.Reason
+	if reason == "" {
+		reason = "receiver rejected payment"
+	}
+
+	finalState, err := applyPaymentEventTx(ctx, dbTx, paymentID, EventReceiverRejected, reason)
+
+	if err != nil {
+		http.Error(w, "failed to reject payment"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var releasedAccountID string
+
+	err = dbTx.QueryRow(ctx, `
+		UPDATE accounts
+		SET reserved_balance = reserved_balance - $1::numeric
+		WHERE account_id = $2
+			AND routing_number = $3
+			AND currency = $4
+			AND reserved_balance >= $1::numeric
+		RETURNING account_id
+	`,
+		amount, debtorAccount, debtorAgent, currency).Scan(&releasedAccountID)
+
+	if err != nil {
+		http.Error(w, "failed to release reserved funds: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := dbTx.Commit(ctx); err != nil {
+		http.Error(w, "failed to commit receiver rejection: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":      paymentID,
+		"status":  string(finalState),
+		"message": reason,
+	})
+
+}
+
+func handleSettlePayment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	paymentID := r.URL.Query().Get("payment_id")
+	if paymentID == "" {
+		http.Error(w, "payment_id is required", http.StatusBadRequest)
+		return
+	}
+
+	dbTx, err := db.Begin(ctx)
+	if err != nil {
+		http.Error(w, "failed to start database transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	defer dbTx.Rollback(ctx)
+
+	var currentState PaymentState
+	var debtorAccount string
+	var creditorAccount string
+	var debtorAgent string
+	var creditorAgent string
+	var amount string
+	var currency string
+
+	err = dbTx.QueryRow(ctx, `
+		SELECT
+			status,
+			debtor_account,
+			creditor_account,
+			debtor_agent,
+			creditor_agent,
+			amount::text,
+			currency
+		FROM payments
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`, paymentID).Scan(
+		&currentState,
+		&debtorAccount,
+		&creditorAccount,
+		&debtorAgent,
+		&creditorAgent,
+		&amount,
+		&currency,
+	)
+
+	if err != nil {
+		http.Error(w, "payment not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if currentState != StateAccepted {
+		http.Error(w, "payment must be accepted before settlement", http.StatusConflict)
+		return
+	}
+
+	_, err = applyPaymentEventTx(
+		ctx,
+		dbTx,
+		paymentID,
+		EventSettlementStarted,
+		"",
+	)
+
+	if err != nil {
+		http.Error(w, "failed to start settlement: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var debitedAccountID string
+
+	err = dbTx.QueryRow(ctx, `
+		UPDATE accounts
+		SET
+			balance = balance - $1::numeric,
+			reserved_balance = reserved_balance - $1::numeric
+		WHERE account_id = $2
+		  AND routing_number = $3
+		  AND currency = $4
+		  AND status = 'active'
+		  AND reserved_balance >= $1::numeric
+		  AND balance >= $1::numeric
+		RETURNING account_id
+	`,
+		amount,
+		debtorAccount,
+		debtorAgent,
+		currency,
+	).Scan(&debitedAccountID)
+
+	if err != nil {
+		http.Error(w, "failed to debit debtor account: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var creditedAccountID string
+
+	err = dbTx.QueryRow(ctx, `
+		UPDATE accounts
+		SET balance = balance + $1::numeric
+		WHERE account_id = $2
+		  AND routing_number = $3
+		  AND currency = $4
+		  AND status = 'active'
+		RETURNING account_id
+	`,
+		amount,
+		creditorAccount,
+		creditorAgent,
+		currency,
+	).Scan(&creditedAccountID)
+
+	if err != nil {
+		http.Error(w, "failed to credit creditor account: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	finalState, err := applyPaymentEventTx(
+		ctx,
+		dbTx,
+		paymentID,
+		EventSettlementCompleted,
+		"",
+	)
+
+	if err != nil {
+		http.Error(w, "failed to complete settlement: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := dbTx.Commit(ctx); err != nil {
+		http.Error(w, "failed to commit settlement: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":       paymentID,
+		"status":   string(finalState),
+		"amount":   amount,
+		"currency": currency,
+		"message":  "payment settled successfully",
 	})
 }
