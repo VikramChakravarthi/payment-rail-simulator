@@ -157,7 +157,6 @@ func recordPaymentClearedOutboxTx(
 	return nil
 }
 
-
 func recordPaymentAcceptedOutboxTx(
 	ctx context.Context,
 	tx pgx.Tx,

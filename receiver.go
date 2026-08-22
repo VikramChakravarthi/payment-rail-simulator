@@ -91,7 +91,7 @@ func respondToPayment(
 			)
 		}
 
-			err = recordPaymentAcceptedOutboxTx(
+		err = recordPaymentAcceptedOutboxTx(
 			ctx,
 			dbTx,
 			paymentID,
@@ -139,7 +139,7 @@ func respondToPayment(
 	}
 
 	// a rejected payment must release the money
-	// that clearing previously reserved 
+	// that clearing previously reserved
 	var releasedAccountID string
 
 	err = dbTx.QueryRow(ctx, `

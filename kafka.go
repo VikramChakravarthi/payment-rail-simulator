@@ -5,14 +5,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
+func kafkaBrokers() []string {
+	raw := os.Getenv("KAFKA_BROKERS")
+
+	if raw == "" {
+		raw = "localhost:9092"
+	}
+
+	parts := strings.Split(raw, ",")
+
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+
+	return parts
+}
+
 func newKafkaClient() (*kgo.Client, error) {
 	// client is the go programs connection to Kafka
-	client, err := kgo.NewClient(kgo.SeedBrokers("localhost:9092")) // creates an object that knows how to communicate with Kafka on port 9092
+	client, err := kgo.NewClient(kgo.SeedBrokers(kafkaBrokers()...)) // creates an object that knows how to communicate with Kafka on port 9092
 
 	if err != nil {
 		return nil, fmt.Errorf(

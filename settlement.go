@@ -96,7 +96,7 @@ func settlePayment(
 		)
 	}
 
-	// record the money movement in the ledger 
+	// record the money movement in the ledger
 	err = recordLedgerTransactionTx(
 		ctx,
 		dbTx,
@@ -114,7 +114,7 @@ func settlePayment(
 		)
 	}
 
-	// debit debtor and release the reserved amount 
+	// debit debtor and release the reserved amount
 	var debitedAccountID string
 
 	err = dbTx.QueryRow(ctx, `
@@ -143,7 +143,7 @@ func settlePayment(
 		)
 	}
 
-	// credit receiver 
+	// credit receiver
 	var creditedAccountID string
 
 	err = dbTx.QueryRow(ctx, `

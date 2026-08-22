@@ -353,6 +353,111 @@
             color: #6b7280;
         }
 
+        /* Reconciliation */
+
+        .reconciliation-summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px;
+            border: 1px solid #e5e7eb;
+            border-radius: 7px;
+            background: #f9fafb;
+            margin-bottom: 16px;
+        }
+
+        .reconciliation-title {
+            font-weight: bold;
+        }
+
+        .reconciliation-meta {
+            margin-top: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .reconciliation-badge {
+            flex-shrink: 0;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .reconciliation-pass {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .reconciliation-fail {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .reconciliation-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .reconciliation-checks {
+            border: 1px solid #e5e7eb;
+            border-radius: 7px;
+            overflow: hidden;
+        }
+
+        .reconciliation-check {
+            display: flex;
+            gap: 12px;
+            padding: 13px 14px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .reconciliation-check:last-child {
+            border-bottom: none;
+        }
+
+        .reconciliation-icon {
+            width: 24px;
+            height: 24px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .reconciliation-icon.pass {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .reconciliation-icon.fail {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .reconciliation-icon.pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .reconciliation-check-name {
+            font-family: monospace;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .reconciliation-check-detail {
+            margin-top: 4px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+
         /* Accounts */
 
         .account-card {
@@ -631,6 +736,17 @@
 
 
     <div class="panel">
+        <h2>Reconciliation</h2>
+
+        <div id="reconciliation-content">
+            <div class="empty-message">
+                No payment loaded yet.
+            </div>
+        </div>
+    </div>
+
+
+    <div class="panel">
         <h2>Account Balances</h2>
 
         <div id="accounts-content">
@@ -688,6 +804,9 @@
     const ledgerContent =
         document.getElementById("ledger-content");
 
+    const reconciliationContent =
+        document.getElementById("reconciliation-content");
+
     const accountsContent =
         document.getElementById("accounts-content");
 
@@ -718,6 +837,12 @@
         `;
 
         ledgerContent.innerHTML = `
+            <div class="empty-message">
+                Waiting for payment information...
+            </div>
+        `;
+
+        reconciliationContent.innerHTML = `
             <div class="empty-message">
                 Waiting for payment information...
             </div>
@@ -994,6 +1119,195 @@
     }
 
 
+    async function loadReconciliation(paymentId) {
+        reconciliationContent.innerHTML = `
+            <div class="empty-message">
+                Running reconciliation checks...
+            </div>
+        `;
+
+        const response = await fetch(
+            `/reconciliation/${encodeURIComponent(paymentId)}`
+        );
+
+        const responseText = await response.text();
+
+        let reconciliation;
+
+        try {
+            reconciliation = JSON.parse(responseText);
+        } catch {
+            reconciliation = responseText;
+        }
+
+        if (!response.ok) {
+            let message =
+                "Failed to retrieve reconciliation result";
+
+            if (
+                typeof reconciliation === "string" &&
+                reconciliation.trim() !== ""
+            ) {
+                message = reconciliation;
+            }
+
+            reconciliationContent.innerHTML = `
+                <div class="error"></div>
+            `;
+
+            reconciliationContent
+                .querySelector(".error")
+                .textContent = message;
+
+            return;
+        }
+
+        reconciliationContent.innerHTML = "";
+
+        const summary =
+            document.createElement("div");
+
+        summary.className =
+            "reconciliation-summary";
+
+        const summaryText =
+            document.createElement("div");
+
+        const title =
+            document.createElement("div");
+
+        title.className =
+            "reconciliation-title";
+
+        title.textContent =
+            "Payment vs. Ledger";
+
+        const meta =
+            document.createElement("div");
+
+        meta.className =
+            "reconciliation-meta";
+
+        meta.textContent =
+            `${reconciliation.currency} ${reconciliation.amount} | ` +
+            `ledger transactions: ${reconciliation.ledger_transaction_count} | ` +
+            `ledger entries: ${reconciliation.ledger_entry_count}`;
+
+        summaryText.appendChild(title);
+        summaryText.appendChild(meta);
+
+        const badge =
+            document.createElement("div");
+
+        badge.className =
+            "reconciliation-badge";
+
+        badge.textContent =
+            reconciliation.reconciliation_status;
+
+        if (
+            reconciliation.reconciliation_status ===
+            "pass"
+        ) {
+            badge.classList.add(
+                "reconciliation-pass"
+            );
+
+        } else if (
+            reconciliation.reconciliation_status ===
+            "fail"
+        ) {
+            badge.classList.add(
+                "reconciliation-fail"
+            );
+
+        } else {
+            badge.classList.add(
+                "reconciliation-pending"
+            );
+        }
+
+        summary.appendChild(summaryText);
+        summary.appendChild(badge);
+
+        reconciliationContent.appendChild(
+            summary
+        );
+
+        const checks =
+            document.createElement("div");
+
+        checks.className =
+            "reconciliation-checks";
+
+        for (
+            const check
+            of reconciliation.checks
+        ) {
+            const row =
+                document.createElement("div");
+
+            row.className =
+                "reconciliation-check";
+
+            const icon =
+                document.createElement("div");
+
+            icon.className =
+                "reconciliation-icon";
+
+            if (
+                reconciliation.reconciliation_status ===
+                "pending"
+            ) {
+                icon.classList.add("pending");
+                icon.textContent = "•";
+
+            } else if (check.passed) {
+                icon.classList.add("pass");
+                icon.textContent = "✓";
+
+            } else {
+                icon.classList.add("fail");
+                icon.textContent = "✕";
+            }
+
+            const details =
+                document.createElement("div");
+
+            const name =
+                document.createElement("div");
+
+            name.className =
+                "reconciliation-check-name";
+
+            name.textContent =
+                check.name;
+
+            const detail =
+                document.createElement("div");
+
+            detail.className =
+                "reconciliation-check-detail";
+
+            detail.textContent =
+                check.detail;
+
+            details.appendChild(name);
+            details.appendChild(detail);
+
+            row.appendChild(icon);
+            row.appendChild(details);
+
+            checks.appendChild(row);
+        }
+
+        reconciliationContent.appendChild(
+            checks
+        );
+    }
+
+
     async function getAccount(accountId) {
         if (!accountId) {
             return null;
@@ -1233,6 +1547,10 @@
             loadAccounts(
                 payment.debtor_account,
                 payment.creditor_account
+            ),
+
+            loadReconciliation(
+                payment.id
             )
         ]);
 
@@ -1666,6 +1984,10 @@
                     loadAccounts(
                         payment.debtor_account,
                         payment.creditor_account
+                    ),
+
+                    loadReconciliation(
+                        payment.id
                     )
                 ]);
 
@@ -1697,6 +2019,12 @@
                 `;
 
                 ledgerContent.innerHTML = `
+                    <div class="empty-message">
+                        No payment information loaded.
+                    </div>
+                `;
+
+                reconciliationContent.innerHTML = `
                     <div class="empty-message">
                         No payment information loaded.
                     </div>
@@ -1990,6 +2318,10 @@
                                         "creditor-account"
                                     )
                                     .value
+                            ),
+
+                            loadReconciliation(
+                                responseBody.id
                             )
                         ]);
 

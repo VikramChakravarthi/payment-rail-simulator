@@ -13,7 +13,8 @@ import (
 
 func newClearingConsumer() (*kgo.Client, error) {
 	client, err := kgo.NewClient(
-		kgo.SeedBrokers("localhost:9092"),
+
+		kgo.SeedBrokers(kafkaBrokers()...),
 
 		// Listen to our payment event stream.
 		kgo.ConsumeTopics(paymentEventsTopic),
@@ -24,13 +25,15 @@ func newClearingConsumer() (*kgo.Client, error) {
 		// We decide when a message has been successfully processed.
 		kgo.DisableAutoCommit(),
 
+		kgo.BlockRebalanceOnPoll(),
+
 		// For this first run, ignore the old demo messages already
 		// sitting in Kafka and begin with new messages.
 		kgo.ConsumeStartOffset(
-			kgo.NewOffset().AtEnd(),
+			kgo.NewOffset().AtStart(),
 		),
 		kgo.ConsumeResetOffset(
-			kgo.NewOffset().AtEnd(),
+			kgo.NewOffset().AtStart(),
 		),
 	)
 
@@ -165,7 +168,7 @@ func runClearingConsumer(
 			}
 		}
 
-		// clearing has been handled 
+		// clearing has been handled
 		// tell Kafka: "we are finished with this message"
 		if err := client.CommitRecords(ctx, record); err != nil {
 			log.Printf(

@@ -34,14 +34,14 @@ func NewRateLimiter(requestsPerSecond rate.Limit, burst int) *RateLimiter {
 // before running the real endpoint, check if the request is allowed
 // if allowed, continue. if not allowed return 429 rate limit exceeded
 func (rl *RateLimiter) MiddleWare(next http.HandlerFunc) http.HandlerFunc {
-	// this is a method called MiddleWare. it belongs to RateLimiter. 
+	// this is a method called MiddleWare. it belongs to RateLimiter.
 	// it takes one HTTP handler called next. it returns another HTTP handler
-	// rl is like self in Python. rl.limiter is like self.limiter 
+	// rl is like self in Python. rl.limiter is like self.limiter
 	// next is the function that should run after the middleware check passes
 
-	// below means return a new function. 
+	// below means return a new function.
 	// the function returned will run later when an HTTP request comes in
-	// this function must return an http.HandlerFunc. a http.HandlerFunc is of the 
+	// this function must return an http.HandlerFunc. a http.HandlerFunc is of the
 	// simply func(writer http.ResponseWriter, request *http.Request)
 	// so the return in this code handles that
 	return func(writer http.ResponseWriter, request *http.Request) {
@@ -60,15 +60,68 @@ func (rl *RateLimiter) MiddleWare(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func LoggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		start := time.Now()
-		log.Printf("Request: %s %s from %s", request.Method, request.URL.Path, request.RemoteAddr)
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
 
-		next(writer, request)
+func (recorder *statusRecorder) WriteHeader(
+	statusCode int,
+) {
+	recorder.statusCode =
+		statusCode
 
-		duration := time.Since(start)
-		log.Printf("Request completed in %v", duration)
+	recorder.ResponseWriter.WriteHeader(
+		statusCode,
+	)
+}
+
+func (recorder *statusRecorder) Write(
+	body []byte,
+) (int, error) {
+
+	if recorder.statusCode == 0 {
+		recorder.statusCode =
+			http.StatusOK
+	}
+
+	return recorder.ResponseWriter.Write(
+		body,
+	)
+}
+
+func LoggingMiddleware(
+	next http.HandlerFunc,
+) http.HandlerFunc {
+
+	return func(
+		writer http.ResponseWriter,
+		request *http.Request,
+	) {
+
+		start :=
+			time.Now()
+
+		recorder :=
+			&statusRecorder{
+				ResponseWriter: writer,
+
+				statusCode: http.StatusOK,
+			}
+
+		next(
+			recorder,
+			request,
+		)
+
+		log.Printf(
+			"http_request method=%s path=%s status=%d duration=%s remote_addr=%s",
+			request.Method,
+			request.URL.Path,
+			recorder.statusCode,
+			time.Since(start),
+			request.RemoteAddr,
+		)
 	}
 }
 

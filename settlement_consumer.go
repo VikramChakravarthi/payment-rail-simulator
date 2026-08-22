@@ -13,17 +13,19 @@ import (
 
 func newSettlementConsumer() (*kgo.Client, error) {
 	client, err := kgo.NewClient(
-		kgo.SeedBrokers("localhost:9092"),
+		kgo.SeedBrokers(kafkaBrokers()...),
 		kgo.ConsumeTopics(paymentEventsTopic),
 		kgo.ConsumerGroup("settlement-worker"),
 		kgo.DisableAutoCommit(),
 
+		kgo.BlockRebalanceOnPoll(),
+
 		kgo.ConsumeStartOffset(
-			kgo.NewOffset().AtEnd(),
+			kgo.NewOffset().AtStart(),
 		),
 
 		kgo.ConsumeResetOffset(
-			kgo.NewOffset().AtEnd(),
+			kgo.NewOffset().AtStart(),
 		),
 	)
 
@@ -95,6 +97,8 @@ func runSettlementConsumer(
 					err,
 				)
 			}
+
+			client.AllowRebalance()
 
 			continue
 		}

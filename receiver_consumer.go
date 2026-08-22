@@ -13,17 +13,19 @@ import (
 
 func newReceiverConsumer() (*kgo.Client, error) {
 	client, err := kgo.NewClient(
-		kgo.SeedBrokers("localhost:9092"),
+		kgo.SeedBrokers(kafkaBrokers()...),
 		kgo.ConsumeTopics(paymentEventsTopic),
 		kgo.ConsumerGroup("receiver-worker"),
 		kgo.DisableAutoCommit(),
 
+		kgo.BlockRebalanceOnPoll(),
+
 		kgo.ConsumeStartOffset(
-			kgo.NewOffset().AtEnd(),
+			kgo.NewOffset().AtStart(),
 		),
 
 		kgo.ConsumeResetOffset(
-			kgo.NewOffset().AtEnd(),
+			kgo.NewOffset().AtStart(),
 		),
 	)
 

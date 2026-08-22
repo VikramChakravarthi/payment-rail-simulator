@@ -73,7 +73,7 @@ func main() {
 	// close database pool when program shuts down
 	defer db.Close()
 
-	kafkaClient, err := newKafkaClient()
+	kafkaClient, err = newKafkaClient()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -151,6 +151,12 @@ func main() {
 	http.HandleFunc("/uetr/", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetPaymentByUETR)))) // API endpoint: GET http://localhost:8080/uetr/{uetr}
 
 	http.HandleFunc("/ledger", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetLedger))))
+
+	http.HandleFunc("/reconciliation/", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleReconciliation))))
+
+	http.HandleFunc("/health", LoggingMiddleware(handleHealth))
+
+	http.HandleFunc("/ready", LoggingMiddleware(handleReady))
 
 	http.HandleFunc("/accounts/", CORSMiddleware(LoggingMiddleware(rateLimiter.MiddleWare(handleGetAccount))))
 

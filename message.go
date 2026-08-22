@@ -13,9 +13,9 @@ type Document struct {
 	FIToFICstmrCdtTrf FIToFICustomerCreditTransfer `json:"FIToFICstmrCdtTrf"`
 }
 
-// GrpHdr is the group/message-level information (message ID, creation time, number of transactions, 
-// and settler method). 
-// CdtTrfTxInf is actual credit transfer/payment details (payment IDs, amount, debtor, creditor, 
+// GrpHdr is the group/message-level information (message ID, creation time, number of transactions,
+// and settler method).
+// CdtTrfTxInf is actual credit transfer/payment details (payment IDs, amount, debtor, creditor,
 // accounts, banks, and remmitance info)
 type FIToFICustomerCreditTransfer struct {
 	GrpHdr      GroupHeader               `json:"GrpHdr"`
