@@ -39,15 +39,15 @@ CREATE TABLE payment_transition_log (
 );
 
 CREATE TABLE IF NOT EXISTS banks (
-    routing_number VARCHAR(35) PRIMARY_KEY, -- unique routing number for each bank
+    routing_number VARCHAR(35) PRIMARY KEY, -- unique routing number for each bank
     bank_name TEXT NOT NULL, -- name of the bank
     status VARCHAR(20) NOT NULL DEFAULT 'active', -- status of the bank (active, inactive, etc.)
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()  -- timestamp of when the bank was added
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
-    account_id VARCHAR(34) PRIMARY_KEY,
-    routing_numer VARCHAR(35) NOT NULL,
+    account_id VARCHAR(34) PRIMARY KEY,
+    routing_numBer VARCHAR(35) NOT NULL,
     owner_name TEXT NOT NULL,
     balance NUMERIC(18,2) NOT NULL DEFAULT 0.00,
     reserved_balance NUMERIC(18,2) NOT NULL DEFAULT 0.00,
@@ -55,3 +55,22 @@ CREATE TABLE IF NOT EXISTS accounts (
     status VARCHAR(20) NOT NULL DEFAULT 'active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS outbox_events ( -- outbox acts as the reliability bridge between postgres and kafka
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    payment_id UUID NOT NULL
+        REFERENCES payments(id),
+
+    event_type VARCHAR(100) NOT NULL,
+
+    payload JSONB NOT NULL,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    published_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_events_unpublished
+ON outbox_events (created_at)
+WHERE published_at IS NULL; -- NULL means kafka has not received the event yet, will change to timestamp when kafka receives it

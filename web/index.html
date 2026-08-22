@@ -1,0 +1,2072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Rail Operations</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            color: #1f2937;
+        }
+
+        header {
+            background: #111827;
+            color: white;
+            padding: 20px 32px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 22px;
+        }
+
+        header p {
+            margin: 6px 0 0;
+            color: #9ca3af;
+        }
+
+        main {
+            max-width: 1000px;
+            margin: 32px auto;
+            padding: 0 20px;
+        }
+
+        .panel {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 18px;
+        }
+
+        .grid,
+        .status-grid,
+        .ledger-summary,
+        .ledger-entries,
+        .accounts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .field.full {
+            grid-column: 1 / -1;
+        }
+
+        label,
+        .status-item strong,
+        .ledger-summary-item strong {
+            font-size: 13px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 11px 18px;
+            border: none;
+            border-radius: 5px;
+            background: #111827;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .error {
+            color: #b91c1c;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .empty-message {
+            color: #6b7280;
+        }
+
+        pre {
+            background: #111827;
+            color: #e5e7eb;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            min-height: 80px;
+        }
+
+        /* Lookup */
+
+        .lookup-form {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .lookup-field {
+            flex: 1;
+        }
+
+        .lookup-form button,
+        .refresh-button {
+            margin-top: 0;
+            white-space: nowrap;
+        }
+
+        /* Recent payments */
+
+        .recent-payments-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .recent-payments-header h2 {
+            margin: 0;
+        }
+
+        .refresh-button {
+            background: white;
+            color: #111827;
+            border: 1px solid #d1d5db;
+            padding: 8px 14px;
+        }
+
+        .refresh-button:hover {
+            background: #f9fafb;
+        }
+
+        .payments-table-wrapper {
+            overflow-x: auto;
+        }
+
+        .payments-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .payments-table th {
+            text-align: left;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #6b7280;
+            padding: 10px 12px;
+            border-bottom: 1px solid #d1d5db;
+        }
+
+        .payments-table td {
+            padding: 13px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            vertical-align: middle;
+        }
+
+        .payments-table tbody tr {
+            cursor: pointer;
+        }
+
+        .payments-table tbody tr:hover {
+            background: #f9fafb;
+        }
+
+        .payment-uetr-cell {
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+        }
+
+        .payment-amount-cell {
+            font-family: monospace;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .payment-time-cell {
+            white-space: nowrap;
+            color: #6b7280;
+            font-size: 13px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 4px 9px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-settled {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .status-failed,
+        .status-rejected {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .status-processing {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        /* Payment status */
+
+        .status-item strong {
+            display: block;
+        }
+
+        .status-value,
+        .ledger-summary-value {
+            font-family: monospace;
+            word-break: break-all;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 5px;
+            padding: 10px;
+            min-height: 40px;
+        }
+
+        /* Timeline */
+
+        .timeline-entry {
+            display: flex;
+            gap: 16px;
+            padding: 14px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .timeline-entry:last-child {
+            border-bottom: none;
+        }
+
+        .timeline-sequence {
+            width: 32px;
+            height: 32px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background: #111827;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .timeline-details {
+            flex: 1;
+        }
+
+        .timeline-transition {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .timeline-event {
+            font-family: monospace;
+            font-size: 13px;
+            color: #4b5563;
+        }
+
+        .timeline-time {
+            margin-top: 4px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .timeline-reason {
+            margin-top: 6px;
+            color: #b91c1c;
+        }
+
+        /* Ledger */
+
+        .ledger-summary {
+            margin-bottom: 20px;
+        }
+
+        .ledger-summary-item strong {
+            display: block;
+        }
+
+        .ledger-entry {
+            border: 1px solid #d1d5db;
+            border-radius: 7px;
+            padding: 18px;
+            background: #f9fafb;
+        }
+
+        .ledger-entry-type {
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 12px;
+        }
+
+        .ledger-entry-account {
+            font-family: monospace;
+            word-break: break-all;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        .ledger-entry-amount {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .ledger-entry-time {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        /* Accounts */
+
+        .account-card {
+            border: 1px solid #d1d5db;
+            border-radius: 7px;
+            padding: 18px;
+            background: #f9fafb;
+        }
+
+        .account-role {
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #4b5563;
+            margin-bottom: 6px;
+        }
+
+        .account-owner {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .account-status {
+            font-size: 13px;
+            margin-bottom: 18px;
+            color: #4b5563;
+        }
+
+        .account-number {
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            white-space: pre-line;
+            margin-bottom: 16px;
+            color: #4b5563;
+        }
+
+        .balance-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 9px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .balance-row:last-child {
+            border-bottom: none;
+        }
+
+        .balance-label {
+            color: #4b5563;
+        }
+
+        .balance-value {
+            font-family: monospace;
+            font-weight: bold;
+            text-align: right;
+        }
+
+        .available-row {
+            font-weight: bold;
+        }
+
+        @media (max-width: 700px) {
+            .grid,
+            .status-grid,
+            .ledger-summary,
+            .ledger-entries,
+            .accounts-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .field.full {
+                grid-column: auto;
+            }
+
+            .lookup-form {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>Payment Rail Operations Console</h1>
+    <p>Submit and inspect payments through the simulated payment rail.</p>
+</header>
+
+<main>
+
+    <div class="panel">
+        <h2>Submit Payment</h2>
+
+        <form id="payment-form">
+            <div class="grid">
+
+                <div class="field">
+                    <label for="debtor-name">Debtor Name</label>
+                    <input id="debtor-name" value="Alice Johnson" required>
+                </div>
+
+                <div class="field">
+                    <label for="creditor-name">Creditor Name</label>
+                    <input id="creditor-name" value="Charlie Davis" required>
+                </div>
+
+                <div class="field">
+                    <label for="debtor-account">Debtor Account</label>
+                    <input
+                        id="debtor-account"
+                        value="34567890123456789012345678901234"
+                        required
+                    >
+                </div>
+
+                <div class="field">
+                    <label for="creditor-account">Creditor Account</label>
+                    <input
+                        id="creditor-account"
+                        value="56789012345678901234567890123456"
+                        required
+                    >
+                </div>
+
+                <div class="field">
+                    <label for="debtor-routing">Debtor Routing Number</label>
+                    <input id="debtor-routing" value="765432109" required>
+                </div>
+
+                <div class="field">
+                    <label for="creditor-routing">Creditor Routing Number</label>
+                    <input id="creditor-routing" value="543210987" required>
+                </div>
+
+                <div class="field">
+                    <label for="amount">Amount</label>
+                    <input
+                        id="amount"
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value="25.00"
+                        required
+                    >
+                </div>
+
+                <div class="field">
+                    <label for="currency">Currency</label>
+                    <input id="currency" value="USD" readonly>
+                </div>
+
+                <div class="field full">
+                    <label for="remittance">Remittance Information</label>
+                    <input
+                        id="remittance"
+                        value="Operations console test payment"
+                    >
+                </div>
+
+            </div>
+
+            <button id="submit-button" type="submit">
+                Submit Payment
+            </button>
+        </form>
+    </div>
+
+
+    <div class="panel">
+        <h2>Find Existing Payment</h2>
+
+        <form id="lookup-form" class="lookup-form">
+
+            <div class="lookup-field">
+                <label for="lookup-uetr">UETR</label>
+                <input
+                    id="lookup-uetr"
+                    placeholder="Enter payment UETR"
+                    required
+                >
+            </div>
+
+            <button id="lookup-button" type="submit">
+                Load Payment
+            </button>
+
+        </form>
+
+        <div id="lookup-error" class="error"></div>
+    </div>
+
+
+    <div class="panel">
+
+        <div class="recent-payments-header">
+            <h2>Recent Payments</h2>
+
+            <button
+                id="refresh-payments-button"
+                class="refresh-button"
+                type="button"
+            >
+                Refresh
+            </button>
+        </div>
+
+        <div
+            id="recent-payments-content"
+            class="payments-table-wrapper"
+        >
+            <div class="empty-message">
+                Loading recent payments...
+            </div>
+        </div>
+
+        <div id="recent-payments-error" class="error"></div>
+    </div>
+
+
+    <div class="panel">
+        <h2>Payment Status</h2>
+
+        <div class="status-grid">
+
+            <div class="status-item">
+                <strong>Current Status</strong>
+                <div id="current-status" class="status-value">
+                    No payment loaded
+                </div>
+            </div>
+
+            <div class="status-item">
+                <strong>Payment ID</strong>
+                <div id="payment-id" class="status-value">—</div>
+            </div>
+
+            <div class="status-item">
+                <strong>UETR</strong>
+                <div id="payment-uetr" class="status-value">—</div>
+            </div>
+
+            <div class="status-item">
+                <strong>Failure / Rejection Reason</strong>
+                <div id="payment-reason" class="status-value">—</div>
+            </div>
+
+        </div>
+    </div>
+
+
+    <div class="panel">
+        <h2>Transition History</h2>
+
+        <div id="transition-timeline">
+            <div class="empty-message">
+                No payment loaded yet.
+            </div>
+        </div>
+    </div>
+
+
+    <div class="panel">
+        <h2>Ledger Entries</h2>
+
+        <div id="ledger-content">
+            <div class="empty-message">
+                No payment loaded yet.
+            </div>
+        </div>
+    </div>
+
+
+    <div class="panel">
+        <h2>Account Balances</h2>
+
+        <div id="accounts-content">
+            <div class="empty-message">
+                No payment loaded yet.
+            </div>
+        </div>
+    </div>
+
+
+    <div class="panel">
+        <h2>Backend Response</h2>
+
+        <div id="error-message" class="error"></div>
+
+        <pre id="response-output">No request made yet.</pre>
+    </div>
+
+</main>
+
+
+<script>
+    const form = document.getElementById("payment-form");
+    const submitButton = document.getElementById("submit-button");
+
+    const lookupForm = document.getElementById("lookup-form");
+    const lookupInput = document.getElementById("lookup-uetr");
+    const lookupButton = document.getElementById("lookup-button");
+    const lookupError = document.getElementById("lookup-error");
+
+    const recentPaymentsContent =
+        document.getElementById("recent-payments-content");
+
+    const recentPaymentsError =
+        document.getElementById("recent-payments-error");
+
+    const refreshPaymentsButton =
+        document.getElementById("refresh-payments-button");
+
+    const currentStatus =
+        document.getElementById("current-status");
+
+    const paymentID =
+        document.getElementById("payment-id");
+
+    const paymentUETR =
+        document.getElementById("payment-uetr");
+
+    const paymentReason =
+        document.getElementById("payment-reason");
+
+    const transitionTimeline =
+        document.getElementById("transition-timeline");
+
+    const ledgerContent =
+        document.getElementById("ledger-content");
+
+    const accountsContent =
+        document.getElementById("accounts-content");
+
+    const responseOutput =
+        document.getElementById("response-output");
+
+    const errorMessage =
+        document.getElementById("error-message");
+
+
+    const terminalStates = [
+        "settled",
+        "failed",
+        "rejected"
+    ];
+
+
+    function resetInspectionPanels(message) {
+        currentStatus.textContent = message;
+        paymentID.textContent = "—";
+        paymentUETR.textContent = "—";
+        paymentReason.textContent = "—";
+
+        transitionTimeline.innerHTML = `
+            <div class="empty-message">
+                Waiting for payment information...
+            </div>
+        `;
+
+        ledgerContent.innerHTML = `
+            <div class="empty-message">
+                Waiting for payment information...
+            </div>
+        `;
+
+        accountsContent.innerHTML = `
+            <div class="empty-message">
+                Waiting for payment information...
+            </div>
+        `;
+    }
+
+
+    function showPaymentStatus(payment) {
+        currentStatus.textContent = payment.status;
+        paymentID.textContent = payment.id;
+        paymentUETR.textContent = payment.uetr;
+
+        paymentReason.textContent =
+            payment.reject_reason || "—";
+    }
+
+
+    async function loadTransitionHistory(paymentId) {
+        const response = await fetch(
+            `/transition-log?payment_id=${encodeURIComponent(paymentId)}`
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                "Failed to retrieve transition history"
+            );
+        }
+
+        const transitions = await response.json();
+
+        transitionTimeline.innerHTML = "";
+
+        if (transitions.length === 0) {
+            transitionTimeline.innerHTML = `
+                <div class="empty-message">
+                    No transitions found.
+                </div>
+            `;
+
+            return;
+        }
+
+        for (const transition of transitions) {
+            const entry = document.createElement("div");
+            entry.className = "timeline-entry";
+
+            const sequence = document.createElement("div");
+            sequence.className = "timeline-sequence";
+            sequence.textContent =
+                transition.sequence_number;
+
+            const details = document.createElement("div");
+            details.className = "timeline-details";
+
+            const transitionText =
+                document.createElement("div");
+
+            transitionText.className =
+                "timeline-transition";
+
+            transitionText.textContent =
+                `${transition.from_state} → ${transition.to_state}`;
+
+            const event = document.createElement("div");
+            event.className = "timeline-event";
+            event.textContent =
+                transition.event_type;
+
+            const time = document.createElement("div");
+            time.className = "timeline-time";
+
+            time.textContent =
+                new Date(
+                    transition.created_at
+                ).toLocaleString();
+
+            details.appendChild(transitionText);
+            details.appendChild(event);
+            details.appendChild(time);
+
+            if (transition.reason) {
+                const reason =
+                    document.createElement("div");
+
+                reason.className =
+                    "timeline-reason";
+
+                reason.textContent =
+                    `Reason: ${transition.reason}`;
+
+                details.appendChild(reason);
+            }
+
+            entry.appendChild(sequence);
+            entry.appendChild(details);
+
+            transitionTimeline.appendChild(entry);
+        }
+    }
+
+
+    async function loadLedger(paymentId) {
+        const response = await fetch(
+            `/ledger?payment_id=${encodeURIComponent(paymentId)}`
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                "Failed to retrieve ledger entries"
+            );
+        }
+
+        const ledger = await response.json();
+
+        ledgerContent.innerHTML = "";
+
+        const summary =
+            document.createElement("div");
+
+        summary.className =
+            "ledger-summary";
+
+
+        const transactionItem =
+            document.createElement("div");
+
+        transactionItem.className =
+            "ledger-summary-item";
+
+        const transactionLabel =
+            document.createElement("strong");
+
+        transactionLabel.textContent =
+            "Ledger Transaction ID";
+
+        const transactionValue =
+            document.createElement("div");
+
+        transactionValue.className =
+            "ledger-summary-value";
+
+        transactionValue.textContent =
+            ledger.ledger_transaction_id;
+
+        transactionItem.appendChild(
+            transactionLabel
+        );
+
+        transactionItem.appendChild(
+            transactionValue
+        );
+
+
+        const currencyItem =
+            document.createElement("div");
+
+        currencyItem.className =
+            "ledger-summary-item";
+
+        const currencyLabel =
+            document.createElement("strong");
+
+        currencyLabel.textContent =
+            "Currency";
+
+        const currencyValue =
+            document.createElement("div");
+
+        currencyValue.className =
+            "ledger-summary-value";
+
+        currencyValue.textContent =
+            ledger.currency;
+
+        currencyItem.appendChild(
+            currencyLabel
+        );
+
+        currencyItem.appendChild(
+            currencyValue
+        );
+
+
+        summary.appendChild(
+            transactionItem
+        );
+
+        summary.appendChild(
+            currencyItem
+        );
+
+        ledgerContent.appendChild(
+            summary
+        );
+
+
+        const entriesContainer =
+            document.createElement("div");
+
+        entriesContainer.className =
+            "ledger-entries";
+
+
+        for (const ledgerEntry of ledger.entries) {
+            const entry =
+                document.createElement("div");
+
+            entry.className =
+                "ledger-entry";
+
+
+            const type =
+                document.createElement("div");
+
+            type.className =
+                "ledger-entry-type";
+
+            type.textContent =
+                ledgerEntry.entry_type;
+
+
+            const account =
+                document.createElement("div");
+
+            account.className =
+                "ledger-entry-account";
+
+            account.textContent =
+                `Account: ${ledgerEntry.account_id}`;
+
+
+            const amount =
+                document.createElement("div");
+
+            amount.className =
+                "ledger-entry-amount";
+
+            amount.textContent =
+                `${ledger.currency} ${ledgerEntry.amount}`;
+
+
+            const time =
+                document.createElement("div");
+
+            time.className =
+                "ledger-entry-time";
+
+            time.textContent =
+                new Date(
+                    ledgerEntry.created_at
+                ).toLocaleString();
+
+
+            entry.appendChild(type);
+            entry.appendChild(account);
+            entry.appendChild(amount);
+            entry.appendChild(time);
+
+            entriesContainer.appendChild(
+                entry
+            );
+        }
+
+
+        ledgerContent.appendChild(
+            entriesContainer
+        );
+    }
+
+
+    async function getAccount(accountId) {
+        if (!accountId) {
+            return null;
+        }
+
+        const response = await fetch(
+            `/accounts/${encodeURIComponent(accountId)}`
+        );
+
+        if (!response.ok) {
+            return null;
+        }
+
+        return await response.json();
+    }
+
+
+    function createBalanceRow(label, value) {
+        const row =
+            document.createElement("div");
+
+        row.className =
+            "balance-row";
+
+
+        const labelElement =
+            document.createElement("div");
+
+        labelElement.className =
+            "balance-label";
+
+        labelElement.textContent =
+            label;
+
+
+        const valueElement =
+            document.createElement("div");
+
+        valueElement.className =
+            "balance-value";
+
+        valueElement.textContent =
+            value;
+
+
+        row.appendChild(
+            labelElement
+        );
+
+        row.appendChild(
+            valueElement
+        );
+
+        return row;
+    }
+
+
+    function createAccountCard(role, account) {
+        const card =
+            document.createElement("div");
+
+        card.className =
+            "account-card";
+
+
+        const roleElement =
+            document.createElement("div");
+
+        roleElement.className =
+            "account-role";
+
+        roleElement.textContent =
+            role;
+
+        card.appendChild(
+            roleElement
+        );
+
+
+        if (!account) {
+            const unavailable =
+                document.createElement("div");
+
+            unavailable.className =
+                "empty-message";
+
+            unavailable.textContent =
+                "Account could not be loaded.";
+
+            card.appendChild(
+                unavailable
+            );
+
+            return card;
+        }
+
+
+        const owner =
+            document.createElement("div");
+
+        owner.className =
+            "account-owner";
+
+        owner.textContent =
+            account.owner_name;
+
+
+        const status =
+            document.createElement("div");
+
+        status.className =
+            "account-status";
+
+        status.textContent =
+            `Status: ${account.status}`;
+
+
+        const accountNumber =
+            document.createElement("div");
+
+        accountNumber.className =
+            "account-number";
+
+        accountNumber.textContent =
+            `Account: ${account.account_id}\n` +
+            `Routing: ${account.routing_number}`;
+
+
+        const balanceRow =
+            createBalanceRow(
+                "Balance",
+                `${account.currency} ${account.balance}`
+            );
+
+
+        const reservedRow =
+            createBalanceRow(
+                "Reserved",
+                `${account.currency} ${account.reserved_balance}`
+            );
+
+
+        const availableRow =
+            createBalanceRow(
+                "Available",
+                `${account.currency} ${account.available_balance}`
+            );
+
+        availableRow.classList.add(
+            "available-row"
+        );
+
+
+        card.appendChild(owner);
+        card.appendChild(status);
+        card.appendChild(accountNumber);
+        card.appendChild(balanceRow);
+        card.appendChild(reservedRow);
+        card.appendChild(availableRow);
+
+        return card;
+    }
+
+
+    async function loadAccounts(
+        debtorAccountId,
+        creditorAccountId
+    ) {
+        if (!debtorAccountId || !creditorAccountId) {
+            accountsContent.innerHTML = `
+                <div class="empty-message">
+                    Account information is not available.
+                </div>
+            `;
+
+            return;
+        }
+
+
+        const [
+            debtorAccount,
+            creditorAccount
+        ] = await Promise.all([
+            getAccount(
+                debtorAccountId
+            ),
+
+            getAccount(
+                creditorAccountId
+            )
+        ]);
+
+
+        accountsContent.innerHTML = "";
+
+
+        const grid =
+            document.createElement("div");
+
+        grid.className =
+            "accounts-grid";
+
+
+        grid.appendChild(
+            createAccountCard(
+                "Debtor",
+                debtorAccount
+            )
+        );
+
+
+        grid.appendChild(
+            createAccountCard(
+                "Creditor",
+                creditorAccount
+            )
+        );
+
+
+        accountsContent.appendChild(
+            grid
+        );
+    }
+
+
+    async function loadPaymentInspection(payment) {
+        showPaymentStatus(
+            payment
+        );
+
+
+        await Promise.all([
+            loadTransitionHistory(
+                payment.id
+            ),
+
+            loadAccounts(
+                payment.debtor_account,
+                payment.creditor_account
+            )
+        ]);
+
+
+        if (payment.status === "settled") {
+            await loadLedger(
+                payment.id
+            );
+
+        } else if (
+            payment.status === "failed" ||
+            payment.status === "rejected"
+        ) {
+            ledgerContent.innerHTML = `
+                <div class="empty-message">
+                    No ledger entries were created because
+                    this payment did not settle.
+                </div>
+            `;
+
+        } else {
+            ledgerContent.innerHTML = `
+                <div class="empty-message">
+                    Payment has not settled yet.
+                </div>
+            `;
+        }
+    }
+
+
+    async function pollPaymentStatus(uetr) {
+        const maxAttempts = 60;
+
+        for (
+            let attempt = 0;
+            attempt < maxAttempts;
+            attempt++
+        ) {
+            const response = await fetch(
+                `/uetr/${encodeURIComponent(uetr)}`
+            );
+
+            if (!response.ok) {
+                throw new Error(
+                    "Failed to retrieve payment status"
+                );
+            }
+
+            const payment =
+                await response.json();
+
+            showPaymentStatus(
+                payment
+            );
+
+            if (
+                terminalStates.includes(
+                    payment.status
+                )
+            ) {
+                await loadPaymentInspection(
+                    payment
+                );
+
+                return payment;
+            }
+
+            await new Promise(
+                resolve =>
+                    setTimeout(
+                        resolve,
+                        500
+                    )
+            );
+        }
+
+        throw new Error(
+            "Timed out waiting for payment to complete"
+        );
+    }
+
+
+    async function loadRecentPayments() {
+        recentPaymentsError.textContent = "";
+
+        refreshPaymentsButton.disabled =
+            true;
+
+        refreshPaymentsButton.textContent =
+            "Loading...";
+
+
+        try {
+            const response = await fetch(
+                "/payments?limit=20"
+            );
+
+
+            if (!response.ok) {
+                throw new Error(
+                    "Failed to retrieve recent payments"
+                );
+            }
+
+
+            const payments =
+                await response.json();
+
+
+            recentPaymentsContent.innerHTML =
+                "";
+
+
+            if (payments.length === 0) {
+                recentPaymentsContent.innerHTML = `
+                    <div class="empty-message">
+                        No payments found.
+                    </div>
+                `;
+
+                return;
+            }
+
+
+            const table =
+                document.createElement("table");
+
+            table.className =
+                "payments-table";
+
+
+            const thead =
+                document.createElement("thead");
+
+            thead.innerHTML = `
+                <tr>
+                    <th>Created</th>
+                    <th>Debtor</th>
+                    <th>Creditor</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>UETR</th>
+                </tr>
+            `;
+
+
+            const tbody =
+                document.createElement("tbody");
+
+
+            for (const payment of payments) {
+                const row =
+                    document.createElement("tr");
+
+
+                const createdCell =
+                    document.createElement("td");
+
+                createdCell.className =
+                    "payment-time-cell";
+
+                createdCell.textContent =
+                    new Date(
+                        payment.created_at
+                    ).toLocaleString();
+
+
+                const debtorCell =
+                    document.createElement("td");
+
+                debtorCell.textContent =
+                    payment.debtor_name;
+
+
+                const creditorCell =
+                    document.createElement("td");
+
+                creditorCell.textContent =
+                    payment.creditor_name;
+
+
+                const amountCell =
+                    document.createElement("td");
+
+                amountCell.className =
+                    "payment-amount-cell";
+
+                amountCell.textContent =
+                    `${payment.currency} ${payment.amount}`;
+
+
+                const statusCell =
+                    document.createElement("td");
+
+
+                const statusBadge =
+                    document.createElement("span");
+
+                statusBadge.className =
+                    "status-badge";
+
+
+                if (
+                    payment.status ===
+                    "settled"
+                ) {
+                    statusBadge.classList.add(
+                        "status-settled"
+                    );
+
+                } else if (
+                    payment.status === "failed" ||
+                    payment.status === "rejected"
+                ) {
+                    statusBadge.classList.add(
+                        "status-failed"
+                    );
+
+                } else {
+                    statusBadge.classList.add(
+                        "status-processing"
+                    );
+                }
+
+
+                statusBadge.textContent =
+                    payment.status;
+
+                statusCell.appendChild(
+                    statusBadge
+                );
+
+
+                const uetrCell =
+                    document.createElement("td");
+
+                uetrCell.className =
+                    "payment-uetr-cell";
+
+                uetrCell.textContent =
+                    payment.uetr;
+
+
+                row.appendChild(
+                    createdCell
+                );
+
+                row.appendChild(
+                    debtorCell
+                );
+
+                row.appendChild(
+                    creditorCell
+                );
+
+                row.appendChild(
+                    amountCell
+                );
+
+                row.appendChild(
+                    statusCell
+                );
+
+                row.appendChild(
+                    uetrCell
+                );
+
+
+                row.addEventListener(
+                    "click",
+                    function () {
+                        lookupInput.value =
+                            payment.uetr;
+
+                        lookupForm.requestSubmit();
+                    }
+                );
+
+
+                tbody.appendChild(
+                    row
+                );
+            }
+
+
+            table.appendChild(
+                thead
+            );
+
+            table.appendChild(
+                tbody
+            );
+
+
+            recentPaymentsContent.appendChild(
+                table
+            );
+
+
+        } catch (error) {
+            recentPaymentsContent.innerHTML = `
+                <div class="empty-message">
+                    Could not load recent payments.
+                </div>
+            `;
+
+            recentPaymentsError.textContent =
+                error.message;
+
+
+        } finally {
+            refreshPaymentsButton.disabled =
+                false;
+
+            refreshPaymentsButton.textContent =
+                "Refresh";
+        }
+    }
+
+
+    refreshPaymentsButton.addEventListener(
+        "click",
+        loadRecentPayments
+    );
+
+
+    lookupForm.addEventListener(
+        "submit",
+        async function (event) {
+            event.preventDefault();
+
+            const uetr =
+                lookupInput.value.trim();
+
+            if (!uetr) {
+                return;
+            }
+
+
+            lookupButton.disabled =
+                true;
+
+            lookupButton.textContent =
+                "Loading...";
+
+            lookupError.textContent =
+                "";
+
+            errorMessage.textContent =
+                "";
+
+            resetInspectionPanels(
+                "Loading..."
+            );
+
+
+            try {
+                const response = await fetch(
+                    `/uetr/${encodeURIComponent(uetr)}`
+                );
+
+
+                const responseText =
+                    await response.text();
+
+
+                let payment;
+
+
+                try {
+                    payment =
+                        JSON.parse(
+                            responseText
+                        );
+
+                } catch {
+                    payment =
+                        responseText;
+                }
+
+
+                responseOutput.textContent =
+                    JSON.stringify(
+                        payment,
+                        null,
+                        2
+                    );
+
+
+                if (!response.ok) {
+                    let message =
+                        "Payment not found";
+
+                    if (
+                        typeof payment === "string" &&
+                        payment.trim() !== ""
+                    ) {
+                        message =
+                            payment;
+                    }
+
+                    throw new Error(
+                        message
+                    );
+                }
+
+
+                showPaymentStatus(
+                    payment
+                );
+
+
+                if (
+                    terminalStates.includes(
+                        payment.status
+                    )
+                ) {
+                    await loadPaymentInspection(
+                        payment
+                    );
+
+                    return;
+                }
+
+
+                await Promise.all([
+                    loadTransitionHistory(
+                        payment.id
+                    ),
+
+                    loadAccounts(
+                        payment.debtor_account,
+                        payment.creditor_account
+                    )
+                ]);
+
+
+                ledgerContent.innerHTML = `
+                    <div class="empty-message">
+                        Payment has not settled yet.
+                        Continuing to monitor...
+                    </div>
+                `;
+
+
+                await pollPaymentStatus(
+                    payment.uetr
+                );
+
+
+            } catch (error) {
+                lookupError.textContent =
+                    error.message;
+
+                currentStatus.textContent =
+                    "Unable to load payment";
+
+                transitionTimeline.innerHTML = `
+                    <div class="empty-message">
+                        No payment information loaded.
+                    </div>
+                `;
+
+                ledgerContent.innerHTML = `
+                    <div class="empty-message">
+                        No payment information loaded.
+                    </div>
+                `;
+
+                accountsContent.innerHTML = `
+                    <div class="empty-message">
+                        No payment information loaded.
+                    </div>
+                `;
+
+
+            } finally {
+                lookupButton.disabled =
+                    false;
+
+                lookupButton.textContent =
+                    "Load Payment";
+            }
+        }
+    );
+
+
+    form.addEventListener(
+        "submit",
+        async function (event) {
+            event.preventDefault();
+
+
+            submitButton.disabled =
+                true;
+
+            submitButton.textContent =
+                "Submitting...";
+
+            errorMessage.textContent =
+                "";
+
+            lookupError.textContent =
+                "";
+
+            resetInspectionPanels(
+                "Submitting..."
+            );
+
+
+            try {
+                const uetr =
+                    crypto.randomUUID();
+
+                const timestamp =
+                    Date.now();
+
+
+                const payment = {
+                    FIToFICstmrCdtTrf: {
+
+                        GrpHdr: {
+                            MsgId:
+                                `MSG-${timestamp}`,
+
+                            CreDtTm:
+                                new Date()
+                                    .toISOString(),
+
+                            NbOfTxs:
+                                "1",
+
+                            SttlmInf: {
+                                SttlmMtd:
+                                    "CLRG"
+                            }
+                        },
+
+
+                        CdtTrfTxInf: {
+
+                            PmtId: {
+                                InstrId:
+                                    `INSTR-${timestamp}`,
+
+                                EndToEndId:
+                                    `E2E-${timestamp}`,
+
+                                TxId:
+                                    `TX-${timestamp}`,
+
+                                UETR:
+                                    uetr
+                            },
+
+
+                            IntrBkSttlmAmt: {
+                                Ccy:
+                                    document
+                                        .getElementById(
+                                            "currency"
+                                        )
+                                        .value,
+
+                                value:
+                                    Number(
+                                        document
+                                            .getElementById(
+                                                "amount"
+                                            )
+                                            .value
+                                    )
+                            },
+
+
+                            ChrgBr:
+                                "SLEV",
+
+
+                            Dbtr: {
+                                Nm:
+                                    document
+                                        .getElementById(
+                                            "debtor-name"
+                                        )
+                                        .value
+                            },
+
+
+                            DbtrAcct: {
+                                Id: {
+                                    Othr: {
+                                        Id:
+                                            document
+                                                .getElementById(
+                                                    "debtor-account"
+                                                )
+                                                .value
+                                    }
+                                }
+                            },
+
+
+                            DbtrAgt: {
+                                FinInstnId: {
+                                    ClrSysMmbId: {
+                                        MmbId:
+                                            document
+                                                .getElementById(
+                                                    "debtor-routing"
+                                                )
+                                                .value
+                                    }
+                                }
+                            },
+
+
+                            CdtrAgt: {
+                                FinInstnId: {
+                                    ClrSysMmbId: {
+                                        MmbId:
+                                            document
+                                                .getElementById(
+                                                    "creditor-routing"
+                                                )
+                                                .value
+                                    }
+                                }
+                            },
+
+
+                            Cdtr: {
+                                Nm:
+                                    document
+                                        .getElementById(
+                                            "creditor-name"
+                                        )
+                                        .value
+                            },
+
+
+                            CdtrAcct: {
+                                Id: {
+                                    Othr: {
+                                        Id:
+                                            document
+                                                .getElementById(
+                                                    "creditor-account"
+                                                )
+                                                .value
+                                    }
+                                }
+                            },
+
+
+                            RmtInf: {
+                                Ustrd:
+                                    document
+                                        .getElementById(
+                                            "remittance"
+                                        )
+                                        .value
+                            }
+                        }
+                    }
+                };
+
+
+                const response = await fetch(
+                    "/payments",
+                    {
+                        method:
+                            "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body:
+                            JSON.stringify(
+                                payment
+                            )
+                    }
+                );
+
+
+                const responseText =
+                    await response.text();
+
+
+                let responseBody;
+
+
+                try {
+                    responseBody =
+                        JSON.parse(
+                            responseText
+                        );
+
+                } catch {
+                    responseBody =
+                        responseText;
+                }
+
+
+                responseOutput.textContent =
+                    JSON.stringify(
+                        responseBody,
+                        null,
+                        2
+                    );
+
+
+                /*
+                 * A validation rejection can return
+                 * a non-2xx response while still
+                 * returning a persisted payment.
+                 */
+
+                if (
+                    typeof responseBody ===
+                        "object" &&
+                    responseBody.id &&
+                    responseBody.uetr &&
+                    responseBody.status
+                ) {
+                    showPaymentStatus(
+                        responseBody
+                    );
+
+
+                    lookupInput.value =
+                        responseBody.uetr;
+
+
+                    if (
+                        responseBody.status ===
+                        "rejected"
+                    ) {
+                        await Promise.all([
+                            loadTransitionHistory(
+                                responseBody.id
+                            ),
+
+                            loadAccounts(
+                                document
+                                    .getElementById(
+                                        "debtor-account"
+                                    )
+                                    .value,
+
+                                document
+                                    .getElementById(
+                                        "creditor-account"
+                                    )
+                                    .value
+                            )
+                        ]);
+
+
+                        ledgerContent.innerHTML = `
+                            <div class="empty-message">
+                                No ledger entries were created because
+                                this payment did not settle.
+                            </div>
+                        `;
+
+
+                        await loadRecentPayments();
+
+                        return;
+                    }
+                }
+
+
+                if (!response.ok) {
+                    let message =
+                        "Payment request failed";
+
+
+                    if (
+                        typeof responseBody ===
+                            "object" &&
+                        responseBody.error
+                    ) {
+                        message =
+                            responseBody.error;
+
+                    } else if (
+                        typeof responseBody ===
+                            "string"
+                    ) {
+                        message =
+                            responseBody;
+                    }
+
+
+                    throw new Error(
+                        message
+                    );
+                }
+
+
+                await pollPaymentStatus(
+                    responseBody.uetr
+                );
+
+
+                await loadRecentPayments();
+
+
+            } catch (error) {
+                errorMessage.textContent =
+                    error.message;
+
+
+            } finally {
+                submitButton.disabled =
+                    false;
+
+                submitButton.textContent =
+                    "Submit Payment";
+            }
+        }
+    );
+
+
+    /*
+     * Automatically populate Recent Payments
+     * when the operations console opens.
+     */
+    loadRecentPayments();
+</script>
+
+</body>
+</html>
